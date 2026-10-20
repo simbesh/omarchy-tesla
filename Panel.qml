@@ -506,9 +506,10 @@ Panel {
     var value = barDisplay === "Range" ? reading.range : reading.battery
     if (value === null || value === undefined) return ""
     var label = String(Math.round(value)) + (barDisplay === "Range" ? "km" : "%")
-    var eta = BarDisplay.homeEta(reading, now / 1000)
-    return label + (eta ? " " + eta : "")
+    return label
   }
+
+  readonly property string barEta: barValue !== "" ? BarDisplay.homeEta(reading, now / 1000) : ""
 
   Process { id: displaySettingProc }
   function selectBarDisplay(mode) {
@@ -589,6 +590,19 @@ Panel {
     active: root.driving
     activeColor: root.liveGreen
     dimmed: root.asleep || root.errorText !== ""
+    tooltipText: button.tooltipText
+    onPressed: function(b) { button.pressed(b) }
+  }
+
+  WidgetButton {
+    anchors.top: parent.top
+    anchors.bottom: parent.bottom
+    visible: root.barEta !== ""
+    bar: root.bar
+    text: root.barEta
+    foreground: "#42a5f5"
+    fontSize: Style.font.bodySmall
+    horizontalMargin: 2
     tooltipText: button.tooltipText
     onPressed: function(b) { button.pressed(b) }
   }
