@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "jankeesvw.tesla",
-  "name": "Tesla",
-  "version": "1.2.1",
-  "author": "Jankees van Woezik",
-  "description": "Your Tesla in the bar: where it is, how full it is, and how far that gets you",
-  "homepage": "https://github.com/jankeesvw/omarchy-tesla",
+  "id": "simbesh.teslamate",
+  "name": "TeslaMate",
+  "version": "2.0.0",
+  "author": "simbesh; original plugin by Jankees van Woezik",
+  "description": "TeslaMate MQTT vehicle status, location and navigation",
+  "homepage": "https://github.com/simbesh/omarchy-tesla",
   "license": "MIT",
   "kinds": [
     "bar-widget"
@@ -14,37 +14,62 @@
     "barWidget": "Panel.qml"
   },
   "barWidget": {
-    "displayName": "Tesla",
-    "description": "Your Tesla in the bar: where it is, how full it is, and how far that gets you",
+    "displayName": "TeslaMate",
+    "description": "TeslaMate MQTT vehicle status, location and navigation",
     "category": "Home",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "vin": "",
       "showRange": true,
       "panelWidth": 380,
       "mapZoom": 16,
       "mapStyle": "Auto",
-      "statePollMinutes": 5,
-      "parkThrottleMinutes": 15,
       "showAddress": true,
       "notifyOnDrive": true,
-      "mapsUrl": "https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+      "mapsUrl": "https://www.google.com/maps/search/?api=1&query={lat},{lon}",
+      "mqttHost": "10.1.1.10",
+      "mqttPort": 1883,
+      "mqttTopic": "teslamate/cars/1",
+      "tyreUnit": "psi"
     },
     "schema": [
       {
-        "key": "vin",
+        "key": "tyreUnit",
+        "type": "enum",
+        "label": "Tyre pressure unit",
+        "defaultValue": "psi",
+        "options": [
+          "psi",
+          "bar"
+        ]
+      },
+      {
+        "key": "mqttTopic",
         "type": "string",
-        "label": "VIN",
-        "defaultValue": "",
-        "description": "Which car is initially selected when the account has more than one. Empty picks the first one Tesla lists. Cars can then be switched from the panel."
+        "label": "Vehicle topic",
+        "defaultValue": "teslamate/cars/1"
+      },
+      {
+        "key": "mqttPort",
+        "type": "integer",
+        "label": "MQTT port",
+        "defaultValue": 1883,
+        "min": 1,
+        "max": 65535,
+        "step": 1
+      },
+      {
+        "key": "mqttHost",
+        "type": "string",
+        "label": "MQTT host",
+        "defaultValue": "10.1.1.10"
       },
       {
         "key": "showRange",
         "type": "boolean",
         "label": "Show the range in the bar",
         "defaultValue": true,
-        "description": "Puts the remaining range in the bar next to the mark, just the number in whatever unit the car's own screen uses. It is the last reading the panel already holds, so it asks the car for nothing extra. This is only where it starts: right-click the widget to put the number away or bring it back, and it stays the way you left it."
+        "description": "Show rated range in kilometres beside the Tesla mark. Right-click the widget to toggle."
       },
       {
         "key": "mapStyle",
@@ -91,26 +116,6 @@
         "label": "Tell me when the car pulls away",
         "defaultValue": true,
         "description": "A desktop notification the moment a reading says the car has gone from parked to driving, the same moment the mark in the bar turns green. Only for a departure this widget watched happen: a car already moving when the bar starts is not news."
-      },
-      {
-        "key": "statePollMinutes",
-        "type": "integer",
-        "label": "Check whether the car is awake every",
-        "min": 1,
-        "max": 60,
-        "step": 1,
-        "defaultValue": 5,
-        "description": "Minutes. This is the cheap question: Tesla answers it from its own records and the car is never involved, so it costs the car nothing at any interval. It is what lights the bar icon."
-      },
-      {
-        "key": "parkThrottleMinutes",
-        "type": "integer",
-        "label": "Leave a parked car alone for",
-        "min": 5,
-        "max": 120,
-        "step": 5,
-        "defaultValue": 15,
-        "description": "Minutes. Reading a car that is awake resets its sleep timer, and a car whose timer keeps resetting never sleeps and flattens its battery over a week of standing still. Tesla needs roughly fifteen minutes of quiet, so shorter than that is the setting that costs you range. A car that is driving or charging is exempt: it is awake regardless."
       },
       {
         "key": "mapsUrl",

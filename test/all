@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
-
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-
 bash -n "$ROOT/bin/tesla"
-"$ROOT/test/smoke"
-"$ROOT/test/regional-routing"
+"${OMARCHY_TESLA_PYTHON:-python3}" -m unittest discover -s "$ROOT/tests" -p 'test_*.py' -v
+bash "$ROOT/tests/place.sh"
+if command -v qmllint >/dev/null; then
+  qmllint -I /usr/share/omarchy/shell "$ROOT/Panel.qml" "$ROOT/MapView.qml" "$ROOT/TeslaMark.qml"
+fi

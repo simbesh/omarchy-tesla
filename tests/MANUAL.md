@@ -1,51 +1,24 @@
-# Manual checks (no QML test runner)
+# Panel checks
 
-Copy and the parked tooltip live in the panel. `tests/place.sh` does not cover them.
+After installing and enabling `simbesh.teslamate`:
 
-Do not run live `tesla place` against the car as a test. Old cache files miss and that would hit Nominatim.
+1. Open the panel. Check map, battery, range, temperatures and tyre units against TeslaMate.
+2. Check that no route displays “No active navigation route”. With real navigation active,
+   confirm the destination and local arrival time after a live route update.
+3. Disconnect the broker or network. Check that the error appears and the driving indicator
+   stops. Restore connectivity and check automatic recovery.
+4. Change the broker or vehicle topic in settings. Verify reconnection and that readings from
+   the previous vehicle disappear.
+5. Test the presentation without publishing to MQTT:
 
-## Fixture for the open sentence
+   ```bash
+   omarchy-shell simbesh.teslamate.test drive 60 90
+   omarchy-shell simbesh.teslamate.test navigate "Test destination" 12
+   omarchy-shell simbesh.teslamate.test park
+   omarchy-shell simbesh.teslamate.test live
+   ```
 
-Copy a reading, then set the rear trunk token:
-
-```
-tesla car > ~/.config/omarchy-tesla/fixture.json
-```
-
-Edit `open` to `["the boot"]`. Delete the file when done.
-
-## C1 — this machine, US English (`en_US`)
-
-- Details label reads `tires`, not `tyres`.
-- With the fixture above, the red line reads `The trunk is open`.
-- Parked tooltip is `Parked at ` plus the glance line, unelided.
-- Glance line may elide at panel width. Do not wrap it.
-
-## C2 — `en_CA`
-
-Restart the bar with `LC_ALL=en_CA.UTF-8` if Qt picks that up. Same as C1 (`tires`, `The trunk is open`). If the bar ignores a one-shot `LC_ALL`, write unverified here rather than guessing.
-
-## C3 — `en_GB` / `en_AU` / `nl_NL`
-
-Restart with `LC_ALL=en_GB.UTF-8` (or `en_AU` / `nl_NL`). Label `tyres`. Fixture sentence `The boot is open`.
-
-## C4 — US desktop, Dutch pin
-
-Address follows the pin; copy follows the desktop. Do not call live Nominatim. Seed the place cache for the car's rounded coordinates with the A3 contract, then open the panel.
-
-```
-lat=$(jq -r .lat ~/.cache/omarchy-tesla/car.json)
-lon=$(jq -r .lon ~/.cache/omarchy-tesla/car.json)
-key=$(awk -v a="$lat" -v b="$lon" 'BEGIN { printf "%.4f_%.4f", a, b }')
-cp tests/fixtures/a3.out.json ~/.cache/omarchy-tesla/places/$key.json
-```
-
-Glance line: `Venweg 12, Kronenberg`. Label: `tires`. Remove the seeded file afterwards.
-
-## A2 — moving
-
-IPC `omarchy-shell jankeesvw.tesla.test drive 87 243` (or drive the car). Glance line drops the house number. Street and town stay, including a US `, PA` / `, DC` suffix.
-
-## A14 — tooltip
-
-Parked, with a place: tooltip is `Parked at ` plus the same string as the glance line.
+   Synthetic panel state ignores incoming readings until `live` reconnects. Departure
+   notifications follow the widget's notification setting during these checks.
+6. Check the popup under light and dark themes and at the minimum panel width. Confirm
+   a long destination fits or wraps, and that the reconnect and maps buttons remain accessible.

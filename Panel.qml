@@ -5,31 +5,12 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 
-// Dude, Where's My Car: a Tesla in the bar, and a map behind it.
-//
-// The bar shows the Tesla mark and, while the car is moving, how fast. The
-// panel shows where it is, which way it is pointing, how full it is and how
-// far that gets you.
-//
-// The interesting constraint is not the drawing, it is the asking. Tesla's
-// API has calls that are answered by Tesla's servers and calls that are
-// answered by the car, and the second kind resets the car's sleep timer. A
-// widget that refreshed itself every few seconds would quietly stop the car
-// ever sleeping and flatten the battery over a week of standing still.
-//
-// So the bar polls only the free call, online, asleep or offline, and the
-// car itself is asked at three moments: when you open the panel, while it is
-// driving (awake regardless of us) and while it is charging (likewise). A
-// parked car is left alone. `bin/tesla` enforces that a second
-// time from the other side, so a mistake in this file cannot flatten anything.
-//
-// Glyphs are \u escapes rather than literal characters, so the source survives
-// editors and patches that mangle private-use codepoints.
+// Vehicle readings arrive over a persistent, read-only TeslaMate subscription.
 Panel {
   id: root
 
-  moduleName: "jankeesvw.tesla"
-  ipcTarget: "jankeesvw.tesla"
+  moduleName: "simbesh.teslamate"
+  ipcTarget: "simbesh.teslamate"
 
   // The script that does the talking sits next to this file, so the plugin
   // runs from wherever it was installed without putting anything on $PATH.
@@ -65,13 +46,13 @@ Panel {
 
   // ----------------------------------------------------------------- settings
 
-  readonly property string configuredVin: setting("vin", "")
-  property string selectedVin: configuredVin
+  readonly property string mqttHost: setting("mqttHost", "10.1.1.10")
+  readonly property int mqttPort: setting("mqttPort", 1883)
+  readonly property string mqttTopic: setting("mqttTopic", "teslamate/cars/1")
+  readonly property string tyreUnit: setting("tyreUnit", "psi")
   readonly property int panelWidth: setting("panelWidth", 380)
   readonly property int mapZoom: setting("mapZoom", 16)
   readonly property string mapStyle: setting("mapStyle", "Auto")
-  readonly property int statePollMinutes: setting("statePollMinutes", 5)
-  readonly property int parkThrottleMinutes: setting("parkThrottleMinutes", 15)
   readonly property bool showAddress: setting("showAddress", true)
   readonly property bool notifyOnDrive: setting("notifyOnDrive", true)
   readonly property string mapsUrl: setting("mapsUrl",
@@ -111,7 +92,6 @@ Panel {
   // missing.
   readonly property bool lightMap: effectiveMapStyle !== "Dark"
 
-
   // Qt decides for itself whether a string is markup, and a Text or tooltip in
   // that mode fetches `<img src="http://...">` for real, from inside the shell
   // process. The address comes from Nominatim and the error text from Tesla, so
@@ -124,23 +104,16 @@ Panel {
   }
 
   function cmd(args) {
-    var base = [root.script,
-                "--park-throttle", String(root.parkThrottleMinutes * 60),
-                "--tile-url", root.tileUrl]
-    if (root.selectedVin !== "") base = base.concat(["--vin", root.selectedVin])
-    return base.concat(args)
+    return [root.script, "--tile-url", root.tileUrl].concat(args)
   }
 
   // -------------------------------------------------------------------- state
 
-  // What the free poll last said: "online", "asleep", "offline", or "" before
-  // the first answer.
+  // TeslaMate vehicle state, independent of the MQTT connection state.
   property string carState: ""
-  // `state` supplies these without waking any car, so the selector can be
-  // drawn before a full reading is available.
+  // Display name when published by TeslaMate; otherwise use the model.
   property string selectedCarName: "Tesla"
-  property var availableCars: []
-  // The last full reading, from `tesla car`. Null until one lands.
+  // Latest assembled MQTT fields. Null until vehicle data arrives.
   property var reading: null
   // The tile plan for the position in `reading`.
   property var mapPlan: null
@@ -170,16 +143,10 @@ Panel {
   // bottom explains itself.
   property string errorHint: ""
 
-  readonly property bool signedIn: errorText === ""
   readonly property bool hasReading: reading !== null && reading.ok === true
   readonly property bool driving: hasReading && reading.driving === true
   readonly property bool charging: hasReading && reading.charging === "Charging"
   readonly property bool asleep: carState === "asleep" || carState === "offline"
-
-  // Whether the car is being held awake by something that is not this widget.
-  // Both cases make it free to ask, and both are cases where the answer is
-  // changing, which is the only time a refresh is worth anything.
-  readonly property bool awakeAnyway: driving || charging
 
   readonly property real lat: hasReading && reading.lat !== null ? reading.lat : 0
   readonly property real lon: hasReading && reading.lon !== null ? reading.lon : 0
@@ -197,115 +164,62 @@ Panel {
     onTriggered: root.now = Date.now()
   }
 
-  // ------------------------------------------------------------------ the car
-
-  // The free call. This is the only thing that runs on a timer all day, and it
-  // never touches the car: Tesla answers it from its own copy of the car's
-  // state. Whatever else changes in this file, this has to stay the cheap one.
+  // One child process owns the subscription and reconnects with backoff.
+  property bool initialized: false
+  property bool testMode: false
   Process {
-    id: stateProc
-    command: root.cmd(["state"])
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var data
-        try {
-          data = JSON.parse(text)
-        } catch (e) {
-          return
-        }
-        root.errorText = data.error || ""
-        root.errorHint = data.hint || ""
-        if (data.ok !== true) return
-        if (!data.fixture && root.selectedVin !== ""
-            && String(data.vin) !== root.selectedVin) return
-
-        // An empty configured VIN means Tesla's first car. Once it answers,
-        // make that choice explicit so every later request and cache lookup is
-        // tied to the same car.
-        if (root.selectedVin === "") root.selectedVin = String(data.vin)
-        root.selectedCarName = data.name || "Tesla"
-        root.availableCars = data.vehicles || []
-
-        var was = root.carState
-        root.carState = data.state
-
-        // A car that has just woken is a car somebody is using, which is
-        // exactly when where-is-it stops being a rhetorical question.
-        if (was !== "online" && data.state === "online") root.refresh(false)
-      }
-    }
-  }
-
-  Timer {
-    interval: Math.max(1, root.statePollMinutes) * 60000
+    id: mqttProc
+    command: root.cmd(["stream", "--host", root.mqttHost,
+                      "--port", String(root.mqttPort), "--topic", root.mqttTopic,
+                      "--pressure", root.tyreUnit])
     running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: if (!stateProc.running) stateProc.running = true
-  }
-
-  // The expensive call, and the only place it is made. `force` is the refresh
-  // button saying the person in front of the screen would rather have the
-  // truth than the battery; everything else goes through the script's throttle.
-  Process {
-    id: carProc
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var data
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (root.testMode) return
         try {
-          data = JSON.parse(text)
+          var data = JSON.parse(line)
+          root.errorText = data.error || ""
+          root.errorHint = data.hint || ""
+          root.carState = data.state || "unknown"
+          root.now = Date.now()
+          if (data.ok === true) {
+            root.selectedCarName = data.name || "Tesla"
+            root.reading = data
+          } else {
+            root.reading = null
+          }
         } catch (e) {
-          return
+          root.errorText = "Invalid MQTT reading"
         }
-        root.errorText = data.error || ""
-        root.errorHint = data.hint || ""
-        if (data.ok !== true) return
-        if (!data.fixture && data.vin && String(data.vin) !== root.selectedVin) return
-        root.reading = data
       }
+    }
+    onExited: {
+      root.errorText = "MQTT reader stopped"
+      root.carState = "unknown"
+      root.reading = null
+      reconnectTimer.restart()
     }
   }
 
-  function refresh(force) {
-    if (carProc.running) return
-    carProc.command = root.cmd(force ? ["car", "--force"] : ["car"])
-    carProc.running = true
-  }
-
-  readonly property bool switchBusy: stateProc.running || carProc.running
-    || wakeProc.running || mapProc.running || placeProc.running
-
-  function selectCar(vin, name) {
-    vin = String(vin || "")
-    if (vin === "" || vin === selectedVin || switchBusy) return
-
-    selectedVin = vin
-    selectedCarName = name || "Tesla"
-    carState = ""
-    reading = null
-    mapPlan = null
-    placeStreet = ""
-    placeTown = ""
-    placeParked = ""
-    errorText = ""
-    errorHint = ""
-    mapDebounce.stop()
-    placeDebounce.stop()
-
-    stateProc.running = true
-    refresh(false)
-  }
-
-  // Only while the car is awake on somebody else's account. A parked car gets
-  // nothing from here at all, which is the point: fifteen minutes of being
-  // left alone is what it needs to go to sleep.
   Timer {
-    interval: root.driving ? 15000 : 60000
-    running: root.awakeAnyway
-    repeat: true
-    onTriggered: root.refresh(false)
+    id: reconnectTimer
+    interval: 5000
+    onTriggered: mqttProc.running = true
   }
 
+  function reconnect() {
+    if (!root.initialized) return
+    root.testMode = false
+    root.reading = null
+    root.errorText = "Connecting to MQTT"
+    if (mqttProc.running) mqttProc.running = false
+    else mqttProc.running = true
+  }
+
+  onMqttHostChanged: reconnect()
+  onMqttPortChanged: reconnect()
+  onMqttTopicChanged: reconnect()
+  onTyreUnitChanged: reconnect()
 
   // ------------------------------------------------------------------ the map
 
@@ -344,23 +258,16 @@ Panel {
 
   onMapZoomChanged: planMap()
 
-  // One handler, because QML takes one per signal: opening the panel is both
-  // a reason to ask the car and a reason to lay out the map.
   onOpenedChanged: {
     planMap()
-    if (!opened) return
-    // Opening the panel is a person asking, so it is worth one reading,
-    // still subject to the script's throttle, so opening it twice in a
-    // minute costs one call, not two.
-    refresh(false)
-    if (!stateProc.running) stateProc.running = true
+    if (opened) placeDebounce.restart()
   }
 
   // The position moving is a reason to redraw the map and to look the new
   // spot up by name. Both are debounced, so a drive is not a thousand
   // requests.
-  onLatChanged: { planMap(); placeDebounce.restart() }
-  onLonChanged: { planMap(); placeDebounce.restart() }
+  onLatChanged: { planMap(); if (!placeDebounce.running) placeDebounce.start() }
+  onLonChanged: { planMap(); if (!placeDebounce.running) placeDebounce.start() }
 
   Process {
     id: placeProc
@@ -383,9 +290,9 @@ Panel {
 
   Timer {
     id: placeDebounce
-    interval: 400
+    interval: 1500
     onTriggered: {
-      if (!root.showAddress || !root.hasPosition || placeProc.running) return
+      if (!root.opened || !root.showAddress || !root.hasPosition || placeProc.running) return
       placeProc.command = root.cmd(["place", String(root.lat), String(root.lon)])
       placeProc.running = true
     }
@@ -394,29 +301,6 @@ Panel {
   onHasPositionChanged: if (hasPosition) placeDebounce.restart()
 
   // ------------------------------------------------------------------ actions
-
-  Process { id: wakeProc }
-
-  // The only thing in this plugin that wakes a sleeping car, behind a button
-  // that only appears when the car is asleep, so it is never something that
-  // merely happened.
-  function wake() {
-    if (wakeProc.running) return
-    wakeProc.command = root.cmd(["wake"])
-    wakeProc.running = true
-    // The car takes a handful of seconds to answer for itself; asking again
-    // straight away would just collect another 408.
-    wakeTimer.restart()
-  }
-
-  Timer {
-    id: wakeTimer
-    interval: 12000
-    onTriggered: {
-      if (!stateProc.running) stateProc.running = true
-      root.refresh(true)
-    }
-  }
 
   Process { id: browserProc }
 
@@ -497,16 +381,11 @@ Panel {
     return Math.round(s / 86400) + " days ago"
   }
 
-  readonly property real readingAge: hasReading ? Math.max(0, now / 1000 - reading.at) : 0
-  // Old enough that the map should stop looking authoritative. An hour is
-  // about when "it is probably still there" turns into "it was there".
-  readonly property bool stale: readingAge > 3600
+  readonly property real readingAge: hasReading && reading.at !== null ? Math.max(0, now / 1000 - reading.at) : 0
+  // Dim retained-only, disconnected or quiet readings on the map.
+  readonly property bool stale: hasReading && (reading.at === null || !reading.connected || readingAge > 300)
 
-  // The name Tesla has on file, when somebody set one. Otherwise what the car
-  // is rather than a name nobody chose: "MODEL S 100D" beats "TESLA" for a car
-  // that was never named. `state` supplies the name before any reading lands,
-  // so the selector can be drawn without waking anything; the reading is what
-  // knows the model, so it refines the answer once it arrives.
+  // Use TeslaMate's display name when available, otherwise the model and trim.
   readonly property string carName: {
     if (selectedCarName !== "" && selectedCarName !== "Tesla") return selectedCarName
     if (!hasReading) return selectedCarName || "Tesla"
@@ -531,15 +410,13 @@ Panel {
   // The one-line answer to the question in the plugin's name.
   readonly property string summary: {
     if (!hasReading) return errorText !== "" ? errorText : "No reading yet"
-    var doing = driving
+    var doing = !reading.connected ? "Disconnected" : carState === "unknown" ? "Unknown vehicle state" : driving
       ? (reading.speed === null ? "Driving" : "Driving " + reading.speed + " " + reading.speed_unit)
       : charging
         ? (reading.charger_power ? "Charging at " + Math.round(reading.charger_power) + " kW" : "Charging")
         : "Parked"
-    // Everything on this panel came out of one reading, so how old that
-    // reading is belongs on the line that is already about when, rather than
-    // stranded at the bottom under a list it appears to be part of.
-    return doing + " · fetched " + agoOf(readingAge)
+    // This dates the latest live message, not every individual MQTT field.
+    return doing + (reading.at === null ? " · retained data, age unknown" : " · MQTT update " + agoOf(readingAge))
   }
 
   // Doors, boot and windows, as one sentence, and only when there is one to
@@ -557,11 +434,9 @@ Panel {
       + (items.length === 1 ? " is open" : " are open")
   }
 
-  // Where it is going, when it is going somewhere. A route set on a parked car
-  // is not a journey, so this only speaks while the car is moving; the rest of
-  // the time the panel has nothing to say about the future and says nothing.
+  // A destination can be known before a live route duration arrives.
   readonly property bool navigating:
-    driving && hasReading && reading.destination && reading.eta
+    hasReading && !!reading.destination
 
   // The locale's own short time, with the seconds taken out of the pattern
   // rather than out of the string: some locales put them in ShortFormat and
@@ -574,10 +449,10 @@ Panel {
   // "Home at 19:48 · 2.6 km". The clock time rather than "in six
   // minutes", because arriving is something you meet the car at, and a time is
   // what you compare against the one on your own wrist.
-  readonly property string etaText: navigating ? etaLine(reading) : ""
+  readonly property string etaText: navigating ? etaLine(reading) : (hasReading ? "No active navigation route" : "")
 
   function etaLine(r) {
-    var parts = [r.destination + " at " + Qt.formatTime(new Date(r.eta * 1000), clockFormat)]
+    var parts = [r.destination + (r.eta ? " · ETA " + Qt.formatTime(new Date(r.eta * 1000), clockFormat) : " · ETA awaiting live route")]
     if (r.eta_distance !== null && r.eta_distance !== undefined)
       parts.push(r.eta_distance + " " + r.range_unit)
     if (r.eta_delay) parts.push(r.eta_delay + " min of traffic")
@@ -599,9 +474,7 @@ Panel {
   // is not speed: it moves a digit at a time over a drive, so it sits still
   // in the corner of your eye in a way the speed never did.
   //
-  // It costs the car nothing. This is the last reading the panel already
-  // holds, not another question asked of it, so the sleep policy is untouched
-  // and the number ages along with everything else on show.
+  // Range uses the latest MQTT value already held by the panel.
   //
   // Right-click puts it away and brings it back, because whether you want a
   // number in your bar is a thing you decide by looking at it rather than by
@@ -612,7 +485,7 @@ Panel {
 
   readonly property string stateDir:
     (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state"))
-    + "/omarchy-tesla"
+    + "/omarchy-teslamate"
 
   readonly property string barRange:
     showRange && hasReading && reading.range !== null && reading.range !== undefined
@@ -644,7 +517,7 @@ Panel {
     }
   }
 
-  Component.onCompleted: mkStateDir.running = true
+  Component.onCompleted: { root.initialized = true; mkStateDir.running = true }
 
   implicitWidth: barRow.implicitWidth
   implicitHeight: button.implicitHeight
@@ -732,9 +605,7 @@ Panel {
     bar: root.bar
     owner: root
     open: root.opened
-    // Click, not hover: opening this fetches map tiles and possibly asks the
-    // car for a reading, so it should happen because you meant it rather than
-    // because the cursor crossed the bar.
+    // Opening the panel fetches map tiles; vehicle updates stream independently.
     triggerMode: "click"
     contentWidth: popup.fittedContentWidth(Style.space(root.panelWidth))
     contentHeight: popup.fittedContentHeight(content.implicitHeight)
@@ -756,8 +627,6 @@ Panel {
         // The plugin is called Tesla everywhere it is listed, because that is
         // what you look for when you go hunting for it. The joke is here, at
         // the top of the panel, where it is the actual question being asked.
-        // Which car it is about is the selector's job, and the selector is
-        // only there when the answer is not obvious.
         PanelSectionHeader {
           id: title
           anchors.left: parent.left
@@ -801,36 +670,6 @@ Panel {
             font.pixelSize: Style.font.caption
             color: root.foreground
             opacity: 0.7
-          }
-        }
-      }
-
-      Row {
-        id: carSelector
-        visible: root.availableCars.length > 1
-        width: parent.width
-        spacing: Style.space(6)
-
-        readonly property real buttonWidth: root.availableCars.length > 0
-          ? (width - spacing * (root.availableCars.length - 1)) / root.availableCars.length
-          : 0
-
-        Repeater {
-          model: root.availableCars
-
-          Button {
-            required property var modelData
-
-            width: carSelector.buttonWidth
-            text: modelData.name || "Tesla"
-            tooltipText: "VIN " + modelData.vin
-            selected: String(modelData.vin) === root.selectedVin
-            enabled: !root.switchBusy
-            bordered: true
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: Style.font.bodySmall
-            onClicked: root.selectCar(modelData.vin, modelData.name)
           }
         }
       }
@@ -1045,12 +884,12 @@ Panel {
         // across each row so the two halves explain each other.
         Detail {
           label: "locked"
-          value: !root.hasReading ? "\u2014" : root.reading.locked ? "yes" : "no"
+          value: !root.hasReading || root.reading.locked === null ? "\u2014" : root.reading.locked ? "yes" : "no"
         }
 
         Detail {
           label: "sentry"
-          value: !root.hasReading ? "\u2014" : root.reading.sentry ? "on" : "off"
+          value: !root.hasReading || root.reading.sentry === null ? "\u2014" : root.reading.sentry ? "on" : "off"
         }
 
         Detail {
@@ -1099,7 +938,7 @@ Panel {
 
         Detail {
           label: "climate"
-          value: !root.hasReading ? "\u2014" : root.reading.climate_on ? "on" : "off"
+          value: !root.hasReading || root.reading.climate_on === null ? "\u2014" : root.reading.climate_on ? "on" : "off"
         }
 
         Detail {
@@ -1131,7 +970,7 @@ Panel {
         // Split evenly rather than sized to their labels: at this width three
         // buttons hugging their text leave a ragged gap on the right, and a
         // row of equal buttons is easier to hit besides.
-        readonly property int count: root.asleep ? 3 : 2
+        readonly property int count: 2
         readonly property int buttonWidth:
           Math.floor((width - Style.space(6) * (count - 1)) / count)
 
@@ -1146,42 +985,22 @@ Panel {
         }
 
         Button {
-          // The cost goes in the tooltip rather than the label, and in as few
-          // words as it takes: a tooltip long enough to be a sentence is one
-          // nobody finishes. "Keeps awake" rather than "wakes" because that is
-          // what happens: the button is disabled while the car is asleep, and
-          // the call behind it could not wake one if it were not.
           width: actions.buttonWidth
-          text: carProc.running ? "Asking\u2026" : "Refresh"
-          tooltipText: "Keeps the car awake ~15 min"
-          enabled: !carProc.running && !root.asleep
+          text: "Reconnect"
+          tooltipText: "Reconnect to TeslaMate MQTT"
           bordered: true
           foreground: root.foreground
           fontFamily: root.fontFamily
-          onClicked: root.refresh(true)
+          onClicked: root.reconnect()
         }
 
-        Button {
-          // Only offered when there is something to wake, so the call that
-          // costs battery is never one click away from the call that does not.
-          visible: root.asleep
-          width: actions.buttonWidth
-          text: wakeProc.running ? "Waking\u2026" : "Wake"
-          enabled: !wakeProc.running
-          bordered: true
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          onClicked: root.wake()
-        }
       }
 
       Text {
         textFormat: Text.PlainText
         width: parent.width
         visible: root.errorText !== ""
-        text: root.errorText === "not signed in"
-          ? "Run  tesla login  once, in a terminal."
-          : root.errorHint !== "" ? root.errorHint : root.errorText
+        text: root.errorHint !== "" ? root.errorHint : root.errorText
         wrapMode: Text.WordWrap
         horizontalAlignment: Text.AlignHCenter
         font.family: root.fontFamily
@@ -1222,18 +1041,19 @@ Panel {
 
   // Lets the panel be exercised without driving anywhere:
   //
-  //   omarchy-shell jankeesvw.tesla.test drive 87 243
-  //   omarchy-shell jankeesvw.tesla.test park
-  //   omarchy-shell jankeesvw.tesla.test sleep
-  //   omarchy-shell jankeesvw.tesla.test live
+  //   omarchy-shell simbesh.teslamate.test drive 87 243
+  //   omarchy-shell simbesh.teslamate.test park
+  //   omarchy-shell simbesh.teslamate.test sleep
+  //   omarchy-shell simbesh.teslamate.test live
   //
   // Synthetic input does not reach this shell, so a test hook is the only way
   // to see what a moving car looks like without one.
   IpcHandler {
-    target: "jankeesvw.tesla.test"
+    target: "simbesh.teslamate.test"
 
     function drive(speed: int, heading: int): string {
       if (!root.hasReading) return "no reading to base a drive on yet"
+      root.testMode = true
       var next = JSON.parse(JSON.stringify(root.reading))
       next.driving = true
       next.shift = "D"
@@ -1245,10 +1065,10 @@ Panel {
       return "driving " + speed + " " + next.speed_unit + " heading " + heading
     }
 
-    // A route on top of whatever the panel is showing. Only visible while the
-    // car is driving, so this is `drive` and then this, in that order.
+    // A synthetic route for checking the navigation line.
     function navigate(destination: string, minutes: int): string {
       if (!root.hasReading) return "no reading to navigate from yet"
+      root.testMode = true
       var next = JSON.parse(JSON.stringify(root.reading))
       next.destination = destination
       next.eta = Math.round(Date.now() / 1000) + minutes * 60
@@ -1260,6 +1080,7 @@ Panel {
 
     function park(): string {
       if (!root.hasReading) return "no reading to park yet"
+      root.testMode = true
       var next = JSON.parse(JSON.stringify(root.reading))
       next.driving = false
       next.shift = "P"
@@ -1273,6 +1094,7 @@ Panel {
     }
 
     function sleep(): string {
+      root.testMode = true
       root.carState = "asleep"
       return "asleep"
     }
@@ -1280,8 +1102,7 @@ Panel {
     // Back to whatever the car actually says, so a test never leaves the panel
     // lying about a real car.
     function live(): string {
-      if (!stateProc.running) stateProc.running = true
-      root.refresh(true)
+      root.reconnect()
       return "refreshing"
     }
   }
