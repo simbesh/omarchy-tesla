@@ -61,6 +61,13 @@ buttons, **Car** to recenter and resume following the vehicle, and **Open ↗** 
 open the car location in your browser. Panning stops automatic following until
 you press **Car**. Clicking the map itself does not launch a browser.
 
+When driving to **Home** or **1 Stonebridge Place, Aspley**, the bar appends
+remaining travel time, for example `57% 23m` or `240km 23m`. Matching ignores
+capitalization and punctuation and accepts “One”, “Stone Bridge”, “Pl”, and
+“Astley” spelling variants. Other destinations do not add a countdown. It uses
+the live route ETA and disappears when that ETA is unavailable, expired, or
+the route is cleared. Icon-only mode stays icon-only.
+
 ## Updates and freshness
 
 One child process subscribes to `teslamate/cars/1/+`, combines field updates, and

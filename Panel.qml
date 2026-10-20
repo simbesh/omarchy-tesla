@@ -5,6 +5,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "MapMath.js" as MapMath
+import "BarDisplay.js" as BarDisplay
 
 // Vehicle readings arrive over a persistent, read-only TeslaMate subscription.
 Panel {
@@ -504,7 +505,9 @@ Panel {
     if (!hasReading || barDisplay === "Icon only") return ""
     var value = barDisplay === "Range" ? reading.range : reading.battery
     if (value === null || value === undefined) return ""
-    return String(Math.round(value)) + (barDisplay === "Range" ? "km" : "%")
+    var label = String(Math.round(value)) + (barDisplay === "Range" ? "km" : "%")
+    var eta = BarDisplay.homeEta(reading, now / 1000)
+    return label + (eta ? " " + eta : "")
   }
 
   Process { id: displaySettingProc }

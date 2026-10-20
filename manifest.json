@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "simbesh.teslamate",
   "name": "TeslaMate",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "simbesh; original plugin by Jankees van Woezik",
   "description": "TeslaMate MQTT vehicle status, location and navigation",
   "homepage": "https://github.com/simbesh/omarchy-tesla",

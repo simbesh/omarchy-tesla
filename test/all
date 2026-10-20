@@ -9,3 +9,5 @@ if command -v qmllint >/dev/null; then
 fi
 
 if command -v node >/dev/null; then node "$ROOT/tests/map-math.cjs"; fi
+
+if command -v node >/dev/null; then node "$ROOT/tests/bar-display.cjs"; fi
