@@ -41,8 +41,9 @@ absolute `bin/python` path. For a terminal test, prefix the command with the var
 ## Display
 
 The bar shows the Tesla mark and charge percentage, such as `57%`, by default.
-In the widget settings, **Status bar display** selects **Charge percentage**,
-**Range** such as `240km`, or **Icon only**. Click for the map, current
+Use the **Status bar** buttons beneath the battery display in the popup to select
+**Charge %**, **Range km** such as `240km`, or **Icon**. The choice is saved and
+applies to every monitor. The same choice is available in widget settings. Click for the map, current
 state, speed, charge level, range, lock and sentry status, mileage, tyre pressure
 range, temperatures, charge limit, energy added, climate status and firmware.
 Open doors, windows, boot and frunk retain the upstream warning display.
@@ -54,6 +55,11 @@ remaining distance and traffic delay when supplied. With no route, it says
 MQTT values already use kilometres for speed, range and mileage. Route distance
 is supplied in miles and converted to kilometres. Tyres arrive in bar and are
 converted to the selected unit. The plugin does not infer the car's screen units.
+
+Drag the map to pan and scroll to zoom around the cursor. The map also has +/−
+buttons, **Car** to recenter and resume following the vehicle, and **Open ↗** to
+open the car location in your browser. Panning stops automatic following until
+you press **Car**. Clicking the map itself does not launch a browser.
 
 ## Updates and freshness
 

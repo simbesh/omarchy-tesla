@@ -5,6 +5,7 @@ import Qt5Compat.GraphicalEffects
 import qs.Commons
 
 import qs.Commons as Commons
+import "MapMath.js" as MapMath
 // The map: tiles laid out under a marker that points the way the car is
 // pointing.
 //
@@ -17,6 +18,17 @@ Item {
 
   // The object from `tesla map`, or null before the first one.
   property var plan: null
+  property real centerLat: 0
+  property real centerLon: 0
+  property int zoom: 16
+  property real carLat: 0
+  property real carLon: 0
+  readonly property var centerPixel: MapMath.world(centerLat, centerLon, zoom)
+  readonly property var carPixel: MapMath.world(carLat, carLon, zoom)
+  readonly property var planPixel: ready ? MapMath.world(plan.centerLat, plan.centerLon, zoom) : centerPixel
+  readonly property real tileScale: ready ? Math.pow(2, zoom - plan.zoom) : 1
+  readonly property real offsetX: MapMath.deltaX(planPixel.x, centerPixel.x, zoom)
+  readonly property real offsetY: planPixel.y - centerPixel.y
   // Degrees clockwise from north, the way Tesla reports it.
   property real heading: 0
   property bool driving: false
@@ -73,9 +85,9 @@ Item {
       Image {
         required property var modelData
 
-        x: modelData.x
-        y: modelData.y
-        width: root.ready ? root.plan.tileSize : 256
+        x: (modelData.x - root.plan.width / 2) * root.tileScale + root.width / 2 + root.offsetX
+        y: (modelData.y - root.plan.height / 2) * root.tileScale + root.height / 2 + root.offsetY
+        width: (root.ready ? root.plan.tileSize : 256) * root.tileScale
         height: width
         source: "file://" + modelData.path
         // Tiles are served at exactly the size they are drawn at, so there is
@@ -156,8 +168,8 @@ Item {
     readonly property real size: Style.space(28)
 
     visible: root.ready
-    x: (root.ready ? root.plan.carX : 0) - width / 2
-    y: (root.ready ? root.plan.carY : 0) - height / 2
+    x: root.width / 2 + MapMath.deltaX(root.carPixel.x, root.centerPixel.x, root.zoom) - width / 2
+    y: root.height / 2 + root.carPixel.y - root.centerPixel.y - height / 2
     width: size
     height: size
 

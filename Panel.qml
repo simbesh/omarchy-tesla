@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import "MapMath.js" as MapMath
 
 // Vehicle readings arrive over a persistent, read-only TeslaMate subscription.
 Panel {
@@ -223,31 +224,47 @@ Panel {
 
   // ------------------------------------------------------------------ the map
 
+  property bool followCar: true
+  property real viewLat: 0
+  property real viewLon: 0
+  property int viewZoom: mapZoom
+  readonly property real centerLat: followCar ? lat : viewLat
+  readonly property real centerLon: followCar ? lon : viewLon
+  property real requestLat: 0
+  property real requestLon: 0
+  property bool mapPending: false
+
   Process {
     id: mapProc
     stdout: StdioCollector {
       onStreamFinished: {
         try {
           var data = JSON.parse(text)
-          if (data.ok === true) root.mapPlan = data
-        } catch (e) {
-        }
+          if (data.ok === true) {
+            data.centerLat = root.requestLat
+            data.centerLon = root.requestLon
+            root.mapPlan = data
+          }
+        } catch (e) {}
       }
     }
+    onExited: if (root.mapPending) mapDebounce.restart()
   }
 
-  // Tiles are fetched over the network, so this waits for the position and the
-  // panel geometry to settle rather than firing on every pixel of a resize.
   Timer {
     id: mapDebounce
     interval: 250
     onTriggered: {
-      if (!root.hasPosition || mapProc.running) return
+      if (!root.opened || !root.hasPosition) return
+      if (mapProc.running) { root.mapPending = true; return }
       var w = Math.round(mapArea.width)
       var h = Math.round(mapArea.height)
       if (w <= 0 || h <= 0) return
-      mapProc.command = root.cmd(["map", String(root.lat), String(root.lon),
-                                  String(root.mapZoom), String(w), String(h)])
+      root.mapPending = false
+      root.requestLat = root.centerLat
+      root.requestLon = root.centerLon
+      mapProc.command = root.cmd(["map", String(root.requestLat), String(root.requestLon),
+                                  String(root.viewZoom), String(w), String(h)])
       mapProc.running = true
     }
   }
@@ -256,7 +273,24 @@ Panel {
     if (root.opened && root.hasPosition) mapDebounce.restart()
   }
 
-  onMapZoomChanged: planMap()
+  function recenterMap() {
+    root.followCar = true
+    planMap()
+  }
+
+  function zoomMap(step, x, y) {
+    var next = Math.max(3, Math.min(19, viewZoom + step))
+    if (next === viewZoom) return
+    var point = MapMath.zoomAt(centerLat, centerLon, viewZoom, next,
+                              x - mapArea.width / 2, y - mapArea.height / 2)
+    viewLat = point.lat
+    viewLon = point.lon
+    followCar = false
+    viewZoom = next
+    planMap()
+  }
+
+  onMapZoomChanged: { viewZoom = mapZoom; planMap() }
 
   onOpenedChanged: {
     planMap()
@@ -266,8 +300,8 @@ Panel {
   // The position moving is a reason to redraw the map and to look the new
   // spot up by name. Both are debounced, so a drive is not a thousand
   // requests.
-  onLatChanged: { planMap(); if (!placeDebounce.running) placeDebounce.start() }
-  onLonChanged: { planMap(); if (!placeDebounce.running) placeDebounce.start() }
+  onLatChanged: { if (followCar) planMap(); if (!placeDebounce.running) placeDebounce.start() }
+  onLonChanged: { if (followCar) planMap(); if (!placeDebounce.running) placeDebounce.start() }
 
   Process {
     id: placeProc
@@ -473,6 +507,14 @@ Panel {
     return String(Math.round(value)) + (barDisplay === "Range" ? "km" : "%")
   }
 
+  Process { id: displaySettingProc }
+  function selectBarDisplay(mode) {
+    if (displaySettingProc.running) return
+    displaySettingProc.command = ["omarchy-shell", "shell", "setBarWidget",
+                                  root.moduleName, "barDisplay", JSON.stringify(mode), "{}"]
+    displaySettingProc.running = true
+  }
+
   Component.onCompleted: root.initialized = true
 
   implicitWidth: barRow.implicitWidth
@@ -643,6 +685,11 @@ Panel {
         MapView {
           anchors.fill: parent
           plan: root.mapPlan
+          centerLat: root.centerLat
+          centerLon: root.centerLon
+          zoom: root.viewZoom
+          carLat: root.lat
+          carLon: root.lon
           lightMap: root.lightMap
           darkMap: root.darkMap
           heading: root.hasReading && root.reading.heading !== null ? root.reading.heading : 0
@@ -666,19 +713,73 @@ Panel {
           opacity: 0.6
         }
 
-        // The map is the link. Where the car is and wanting to go there are
-        // the same thought, so there is nothing to aim at but what you are
-        // already looking at.
         MouseArea {
+          id: mapGesture
           anchors.fill: parent
           enabled: root.hasPosition
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.openInMaps()
+          cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+          preventStealing: true
+          property real startX: 0
+          property real startY: 0
+          property real startLat: 0
+          property real startLon: 0
+          onPressed: function(mouse) {
+            startX = mouse.x; startY = mouse.y
+            startLat = root.centerLat; startLon = root.centerLon
+            root.viewLat = startLat; root.viewLon = startLon
+            root.followCar = false
+          }
+          onPositionChanged: function(mouse) {
+            if (!pressed) return
+            var point = MapMath.pan(startLat, startLon, root.viewZoom,
+                                    mouse.x - startX, mouse.y - startY)
+            root.viewLat = point.lat; root.viewLon = point.lon
+                  }
+          onReleased: root.planMap()
+          onCanceled: root.planMap()
+          onWheel: function(wheel) {
+            var delta = wheel.angleDelta.y || wheel.pixelDelta.y
+            if (delta !== 0) root.zoomMap(delta > 0 ? 1 : -1, wheel.x, wheel.y)
+            wheel.accepted = true
+          }
         }
 
-        // No speed badge here any more. It said what the line under the map
-        // already says and what the status word above it already implies, and
-        // it did so on top of the one thing in the panel worth looking at.
+        Row {
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.margins: Style.space(6)
+          spacing: Style.space(4)
+          Button {
+            text: "−"
+            tooltipText: "Zoom out"
+            enabled: root.hasPosition && root.viewZoom > 3
+            background: Commons.Color.background
+            onClicked: root.zoomMap(-1, mapArea.width / 2, mapArea.height / 2)
+          }
+          Button {
+            text: "+"
+            tooltipText: "Zoom in"
+            enabled: root.hasPosition && root.viewZoom < 19
+            background: Commons.Color.background
+            onClicked: root.zoomMap(1, mapArea.width / 2, mapArea.height / 2)
+          }
+          Button {
+            text: "Car"
+            tooltipText: "Recenter and follow the car"
+            enabled: root.hasPosition
+            selected: root.followCar
+            background: Commons.Color.background
+            onClicked: root.recenterMap()
+          }
+          Button {
+            text: "Open ↗"
+            tooltipText: "Open car location in maps"
+            enabled: root.hasPosition
+            background: Commons.Color.background
+            onClicked: root.openInMaps()
+          }
+        }
+
       }
 
       // -------------------------------------------------------------- where
@@ -817,6 +918,44 @@ Panel {
 
       PanelSeparator { width: parent.width }
 
+      Column {
+        width: parent.width
+        spacing: Style.space(4)
+        Text {
+          text: "Status bar display"
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          color: root.foreground
+        }
+        Row {
+          id: displayChoices
+          width: parent.width
+          spacing: Style.space(6)
+          readonly property real choiceWidth: (width - spacing * 2) / 3
+          Button {
+            width: displayChoices.choiceWidth
+            text: "Charge %"
+            selected: root.barDisplay === "Charge percentage"
+            bordered: true
+            onClicked: root.selectBarDisplay("Charge percentage")
+          }
+          Button {
+            width: displayChoices.choiceWidth
+            text: "Range km"
+            selected: root.barDisplay === "Range"
+            bordered: true
+            onClicked: root.selectBarDisplay("Range")
+          }
+          Button {
+            width: displayChoices.choiceWidth
+            text: "Icon"
+            selected: root.barDisplay === "Icon only"
+            bordered: true
+            onClicked: root.selectBarDisplay("Icon only")
+          }
+        }
+      }
+
       // ------------------------------------------------------------ details
 
       // The things you look up rather than watch. Two columns of label-over-
@@ -922,19 +1061,10 @@ Panel {
         // Split evenly rather than sized to their labels: at this width three
         // buttons hugging their text leave a ragged gap on the right, and a
         // row of equal buttons is easier to hit besides.
-        readonly property int count: 2
+        readonly property int count: 1
         readonly property int buttonWidth:
           Math.floor((width - Style.space(6) * (count - 1)) / count)
 
-        Button {
-          width: actions.buttonWidth
-          text: "Open in maps"
-          enabled: root.hasPosition
-          bordered: true
-          foreground: root.foreground
-          fontFamily: root.fontFamily
-          onClicked: root.openInMaps()
-        }
 
         Button {
           width: actions.buttonWidth

@@ -22,3 +22,9 @@ After installing and enabling `simbesh.teslamate`:
    notifications follow the widget's notification setting during these checks.
 6. Check the popup under light and dark themes and at the minimum panel width. Confirm
    a long destination fits or wraps, and that the reconnect and maps buttons remain accessible.
+
+7. Use Charge %, Range km and Icon beneath the battery display. Verify the bar
+   updates on both monitors and keeps the choice after reopening the popup.
+8. Drag the map, scroll at an off-center point, and use +/−. Verify the marker
+   stays at its geographic location, new tiles fill in, and a click never opens
+   a browser. Press Car to resume tracking; Open ↗ should open the car location.
