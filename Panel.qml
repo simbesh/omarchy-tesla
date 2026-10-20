@@ -442,6 +442,11 @@ Panel {
     return carState
   }
 
+  readonly property string gearLetter: {
+    var gear = hasReading ? String(reading.shift || "").toUpperCase() : ""
+    return ["P", "R", "N", "D"].indexOf(gear) >= 0 ? gear : "—"
+  }
+
   // The one-line answer to the question in the plugin's name.
   readonly property string summary: {
     if (!hasReading) return errorText !== "" ? errorText : "No reading yet"
@@ -450,10 +455,8 @@ Panel {
       : charging
         ? (reading.charger_power ? "Charging at " + Math.round(reading.charger_power) + " kW" : "Charging")
         : "Parked"
-    var gear = String(reading.shift || "").toUpperCase()
-    var gearText = ["P", "R", "N", "D"].indexOf(gear) >= 0 ? gear : "—"
     // This dates the latest live message, not every individual MQTT field.
-    return doing + " · Gear " + gearText
+    return doing
       + (reading.at === null ? " · retained data, age unknown" : " · MQTT update " + agoOf(readingAge))
   }
 
@@ -804,8 +807,34 @@ Panel {
 
       // -------------------------------------------------------------- where
 
-      Column {
+      Item {
         width: parent.width
+        height: Math.max(locationText.implicitHeight, gearBadge.height)
+
+        Rectangle {
+          id: gearBadge
+          anchors.top: parent.top
+          anchors.right: parent.right
+          width: Style.space(30)
+          height: width
+          radius: Style.space(4)
+          color: "transparent"
+          border.width: 1
+          border.color: root.foreground
+          opacity: root.hasReading && root.reading.connected ? 0.9 : 0.5
+          Text {
+            anchors.centerIn: parent
+            text: root.gearLetter
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+            color: root.foreground
+          }
+        }
+
+        Column {
+          id: locationText
+          width: parent.width - gearBadge.width - Style.space(10)
         spacing: Style.space(2)
 
         Text {
@@ -843,6 +872,7 @@ Panel {
           color: root.foreground
           opacity: 0.65
         }
+      }
       }
 
       PanelSeparator { width: parent.width }
