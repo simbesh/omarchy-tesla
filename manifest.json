@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "simbesh.teslamate",
   "name": "TeslaMate",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "simbesh; original plugin by Jankees van Woezik",
   "description": "TeslaMate MQTT vehicle status, location and navigation",
   "homepage": "https://github.com/simbesh/omarchy-tesla",
@@ -20,7 +20,6 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "showRange": true,
       "panelWidth": 380,
       "mapZoom": 16,
       "mapStyle": "Auto",
@@ -30,7 +29,8 @@
       "mqttHost": "10.1.1.10",
       "mqttPort": 1883,
       "mqttTopic": "teslamate/cars/1",
-      "tyreUnit": "psi"
+      "tyreUnit": "psi",
+      "barDisplay": "Charge percentage"
     },
     "schema": [
       {
@@ -65,11 +65,16 @@
         "defaultValue": "10.1.1.10"
       },
       {
-        "key": "showRange",
-        "type": "boolean",
-        "label": "Show the range in the bar",
-        "defaultValue": true,
-        "description": "Show rated range in kilometres beside the Tesla mark. Right-click the widget to toggle."
+        "key": "barDisplay",
+        "type": "enum",
+        "label": "Status bar display",
+        "options": [
+          "Charge percentage",
+          "Range",
+          "Icon only"
+        ],
+        "defaultValue": "Charge percentage",
+        "description": "Choose battery charge (57%), rated range (240km), or just the Tesla icon."
       },
       {
         "key": "mapStyle",

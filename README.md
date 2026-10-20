@@ -40,7 +40,9 @@ absolute `bin/python` path. For a terminal test, prefix the command with the var
 
 ## Display
 
-The bar shows the Tesla mark and optional rated range. Click for the map, current
+The bar shows the Tesla mark and charge percentage, such as `57%`, by default.
+In the widget settings, **Status bar display** selects **Charge percentage**,
+**Range** such as `240km`, or **Icon only**. Click for the map, current
 state, speed, charge level, range, lock and sentry status, mileage, tyre pressure
 range, temperatures, charge limit, energy added, climate status and firmware.
 Open doors, windows, boot and frunk retain the upstream warning display.
