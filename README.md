@@ -8,7 +8,7 @@ read-only MQTT subscription.
 
 ## Install
 
-Install Python 3 and Paho MQTT 2.x. On Omarchy:
+Install Python 3 and Paho MQTT 1.6 or 2.x. On Omarchy:
 
 ```bash
 sudo pacman -S python-paho-mqtt
@@ -32,7 +32,7 @@ For a Python virtual environment instead of the system package:
 
 ```bash
 python3 -m venv ~/.local/share/omarchy-teslamate/venv
-~/.local/share/omarchy-teslamate/venv/bin/pip install 'paho-mqtt>=2.0,<3'
+~/.local/share/omarchy-teslamate/venv/bin/pip install 'paho-mqtt>=1.6,<3'
 ```
 
 Set `OMARCHY_TESLA_PYTHON` in the shell's launch environment to that environment's

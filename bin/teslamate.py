@@ -127,20 +127,21 @@ def main():
     lock = threading.Lock()
     stop = threading.Event()
     status = dict(connected=False, error='Connecting to MQTT', dirty=True)
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    api_v2 = hasattr(mqtt, "CallbackAPIVersion")
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2) if api_v2 else mqtt.Client()
     client.reconnect_delay_set(min_delay=1, max_delay=30)
 
     def on_connect(client, userdata, flags, reason, properties):
         with lock:
-            status.update(connected=False, error='MQTT connection refused' if reason.is_failure else 'Waiting for vehicle data', dirty=True)
+            status.update(connected=False, error='MQTT connection refused' if reason != 0 else 'Waiting for vehicle data', dirty=True)
             # Clear old state before replaying retained values from this session.
             vehicle.__init__()
-        if not reason.is_failure:
+        if reason == 0:
             client.subscribe(topic + '/+', qos=0)
 
     def on_subscribe(client, userdata, mid, reasons, properties):
         with lock:
-            failed = not reasons or any(r.is_failure for r in reasons)
+            failed = not reasons or any((r.value if hasattr(r, "value") else r) >= 128 for r in reasons)
             status.update(connected=not failed, error='MQTT subscription refused' if failed else '', dirty=True)
 
     def on_disconnect(client, userdata, flags, reason, properties):
@@ -161,9 +162,9 @@ def main():
             vehicle.update(key, message.payload, message.retain)
             status['dirty'] = True
 
-    client.on_connect = on_connect
-    client.on_subscribe = on_subscribe
-    client.on_disconnect = on_disconnect
+    client.on_connect = on_connect if api_v2 else lambda c, u, f, r: on_connect(c, u, f, r, None)
+    client.on_subscribe = on_subscribe if api_v2 else lambda c, u, mid, r: on_subscribe(c, u, mid, r, None)
+    client.on_disconnect = on_disconnect if api_v2 else lambda c, u, r: on_disconnect(c, u, None, r, None)
     client.on_connect_fail = on_connect_fail
     client.on_message = on_message
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
