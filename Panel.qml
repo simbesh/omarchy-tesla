@@ -450,8 +450,11 @@ Panel {
       : charging
         ? (reading.charger_power ? "Charging at " + Math.round(reading.charger_power) + " kW" : "Charging")
         : "Parked"
+    var gear = String(reading.shift || "").toUpperCase()
+    var gearText = ["P", "R", "N", "D"].indexOf(gear) >= 0 ? gear : "—"
     // This dates the latest live message, not every individual MQTT field.
-    return doing + (reading.at === null ? " · retained data, age unknown" : " · MQTT update " + agoOf(readingAge))
+    return doing + " · Gear " + gearText
+      + (reading.at === null ? " · retained data, age unknown" : " · MQTT update " + agoOf(readingAge))
   }
 
   // Doors, boot and windows, as one sentence, and only when there is one to
@@ -834,7 +837,7 @@ Panel {
           textFormat: Text.PlainText
           width: parent.width
           text: root.summary
-          elide: Text.ElideRight
+          wrapMode: Text.WordWrap
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           color: root.foreground
