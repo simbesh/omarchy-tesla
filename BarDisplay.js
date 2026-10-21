@@ -12,3 +12,14 @@ function homeEta(reading, nowSeconds) {
   if (typeof reading.eta !== "number" || !isFinite(reading.eta) || reading.eta < nowSeconds) return ""
   return Math.ceil((reading.eta - nowSeconds) / 60) + "m"
 }
+
+// Charging uses the same secondary bar slot as the home countdown.
+function secondaryStatus(reading, nowSeconds) {
+  if (!reading || !reading.connected) return ""
+  if (reading.charging === "Charging") {
+    var power = reading.charger_power
+    if (typeof power !== "number" || !isFinite(power) || power < 0) return "⚡"
+    return "⚡ " + String(Math.round(power * 10) / 10) + "kW"
+  }
+  return homeEta(reading, nowSeconds)
+}

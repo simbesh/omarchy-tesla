@@ -515,7 +515,7 @@ Panel {
     return label
   }
 
-  readonly property string barEta: barValue !== "" ? BarDisplay.homeEta(reading, now / 1000) : ""
+  readonly property string barSecondary: barValue !== "" ? BarDisplay.secondaryStatus(reading, now / 1000) : ""
 
   Process { id: displaySettingProc }
   function selectBarDisplay(mode) {
@@ -603,9 +603,9 @@ Panel {
   WidgetButton {
     anchors.top: parent.top
     anchors.bottom: parent.bottom
-    visible: root.barEta !== ""
+    visible: root.barSecondary !== ""
     bar: root.bar
-    text: root.barEta
+    text: root.barSecondary
     foreground: "#42a5f5"
     fontSize: Style.font.bodySmall
     horizontalMargin: 2

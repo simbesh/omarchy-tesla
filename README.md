@@ -68,6 +68,11 @@ capitalization and punctuation and accepts “One”, “Stone Bridge”, “Pl�
 the live route ETA and disappears when that ETA is unavailable, expired, or
 the route is cleared. Icon-only mode stays icon-only.
 
+While charging, the same blue bar slot shows the charging rate, for example
+`57% ⚡ 7kW`. If power is unavailable it shows only ⚡. The rate disappears
+when charging stops or the MQTT connection is lost. kW measures charging power;
+the popup's energy-added value remains in kWh.
+
 ## Updates and freshness
 
 One child process subscribes to `teslamate/cars/1/+`, combines field updates, and
